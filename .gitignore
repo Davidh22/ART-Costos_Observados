@@ -1,0 +1,40 @@
+# ART — Costos Observados: .gitignore
+
+# Datos — no subir al repo
+*.xlsx
+*.xls
+*.parquet
+*.db
+*.sqlite
+*.csv
+
+# PDFs y ZIPs descargados
+descargas_indicadores/
+*.pdf
+*.zip
+
+# Logs
+*.log
+
+# Cache de keywords generadas con Claude
+keywords_v4.json
+
+# Perfil de Chrome (Selenium)
+chrome_secop_profile/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+venv/
+.venv/
+
+# R
+.Rhistory
+.RData
+.Rproj.user/
+
+# OS
+.DS_Store
+Thumbs.db
