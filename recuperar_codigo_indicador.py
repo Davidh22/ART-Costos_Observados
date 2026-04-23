@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-RECUPERADOR DE CÓDIGO DE INDICADOR
+Este codigo recupera los codigos de indicador para el proceso de web scraping de los pdf
 ====================================
 Cruza el Excel de costeo unitario ya generado (costeo_unitario_contratos.xlsx)
 con el historial de descargas (secop_indicadores.log) y los archivos de
