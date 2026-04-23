@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-EXTRACTOR DE COSTEO UNITARIO DESDE PDFs — SECOP-II / Claude Sonnet
+IDENTIFICADOR Y EXTRACTOR DE COSTEO UNITARIO DESDE PDFs — SECOP-II / Claude Sonnet
 ====================================================================
-Lee TODOS los PDFs de una carpeta, envía cada uno a Claude Sonnet 4.5
+Lee TODOS los PDFs de la carpeta, envía cada uno a Claude Sonnet 4.5
 y extrae: municipio/subregión, precio, cantidad, costo unitario,
 descripción del contrato, año y código del contrato.
 
-USO:
+LIBRERIAS O PAQUETES:
     pip install anthropic pandas openpyxl
     python extraer_costeo_pdfs.py
 
@@ -36,18 +36,14 @@ from openpyxl import load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
+# _____________________________________________________________________________
 
-# =============================================================================
 # CONFIGURACIÓN  — EDITA ESTAS VARIABLES
-# =============================================================================
 
 # Ruta donde están los PDFs (todos sueltos en esta carpeta)
 RUTA_PDFS = r"C:\Users\velez\Documents\Consultorias_2026\ART_Costeo\Datos\Nueva_Estrategia\Fase_II\Pdf_mcp_final"
 
-# API key de Anthropic — recomendado: usa variable de entorno ANTHROPIC_API_KEY
-# Si la defines en PowerShell con:  $env:ANTHROPIC_API_KEY = "sk-ant-..."
-# entonces deja esta línea tal cual.
-# Alternativamente, reemplaza el valor por tu key directamente (menos seguro).
+# Usando API key de Anthropic
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
 # Modelo Claude a usar
@@ -509,7 +505,7 @@ def main():
                 "fecha_extraccion":     datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
 
-            # Si el modelo no calculó el costo unitario pero tenemos precio y cantidad, calcular
+            # Si el modelo no calcula el costo unitario pero hay precio y cantidad, entonces se calcula
             try:
                 if (not fila["costo_unitario_cop"]
                         and fila["precio_cop"]
