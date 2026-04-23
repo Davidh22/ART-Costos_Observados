@@ -1,39 +1,39 @@
 # -*- coding: utf-8 -*-
 """
-FASE 1 - INVENTARIO DE CONTRATOS POR SUBREGION x SUBPROGRAMA (con seleccion de indicador)
+FASE 1 - INVENTARIO DE CONTRATOS POR SUBREGION x SUBPROGRAMA (con selección de indicador)
 Sistema de Costeo Unitario de Subprogramas PDET
-Version: 4.4 - Sin upper() en queries para evitar timeouts en SECOP
+Versión: 4.4 - Se quitó upper() en las queries para evitar timeouts en SECOP
 
-LOGICA DE ITERACION:
+CÓMO FUNCIONA:
   1. Lee la hoja 'Base_Indicadores_Final' del Excel de entrada
-  2. Para cada Subregion (una a la vez, en orden):
-       a. Filtra todos los registros de esa subregion
-       b. Para cada CodSubprograma dentro de la subregion:
-            - Si hay varios indicadores => selecciona el de mayor 'prioridadsubprogramasguillermo'
-            - Si hay empate => usa el primero segun orden del Excel
-            - Si la subregion no tiene datos de contratos => se registra explicitamente
-       c. Ejecuta las 3 capas de busqueda SECOP para el indicador seleccionado
-  3. Guarda resultados en SQLite y exporta Excel de 8 hojas
+  2. Por cada Subregión (una a la vez, en orden):
+       a. Filtra todos los registros de esa subregión
+       b. Por cada CodSubprograma dentro de la subregión:
+            - Si hay varios indicadores => se queda con el de mayor 'prioridadsubprogramasguillermo'
+            - Si hay empate => usa el primero según como aparece en el Excel
+            - Si la subregión no tiene contratos => se deja registrado explícitamente
+       c. Corre las 4 capas de búsqueda en SECOP para el indicador escogido
+  3. Guarda los resultados en SQLite y exporta un Excel de 8 hojas
 
 EXCEL DE ENTRADA (hoja: Base_Indicadores_Final):
-  Subregion                      -> nombre de la subregion PDET
-  CodSubprograma                 -> codigo del subprograma
-  Cod_indicador                  -> codigo del indicador
-  nombreindicador                -> descripcion del indicador
-  prioridadsubprogramasguillermo -> prioridad (mayor = mas relevante)
-  subprograma                    -> descripcion del subprograma
+  Subregion                      -> nombre de la subregión PDET
+  CodSubprograma                 -> código del subprograma
+  Cod_indicador                  -> código del indicador
+  nombreindicador                -> descripción del indicador
+  prioridadsubprogramasguillermo -> prioridad (mayor = más relevante)
+  subprograma                    -> descripción del subprograma
 
-ESTADOS DE CONTRATO INCLUIDOS:
-  Cerrado, terminado, En ejecucion, Modificado
-  NOTA: sin tilde en 'ejecucion' - la API SECOP rechaza caracteres especiales
+ESTADOS DE CONTRATO QUE SE INCLUYEN:
+  Cerrado, Terminado, En ejecucion, Modificado
+  OJO: "ejecucion" va sin tilde — la API de SECOP no acepta caracteres especiales
 
-LOGICA DE BUSQUEDA - 4 CAPAS:
-  Capa 1: keywords AND municipios de la subregion propia
-  Capa 2: keywords AND departamento de la subregion
-  Capa 3: keywords en otras subregiones PDET (para factor de ajuste territorial)
-  Capa 4: keywords en todo el pais (solo si capas 1-3 retornan 0 contratos)
+CÓMO BUSCA - 4 CAPAS:
+  Capa 1: keywords + municipios de la subregión propia
+  Capa 2: keywords + departamento de la subregión
+  Capa 3: keywords en otras subregiones PDET (para el factor de ajuste territorial)
+  Capa 4: keywords en todo el país (solo si las capas 1 a 3 no devuelven nada)
 
-COMANDOS:
+PARA CORRERLO:
   pip install requests pandas openpyxl tqdm anthropic
   python secop_fase1_v4_iterativo.py --modo test --subregion "Alto Patia y Norte del Cauca" --token "TU_TOKEN"
   python secop_fase1_v4_iterativo.py --modo batch --token "TU_TOKEN"
