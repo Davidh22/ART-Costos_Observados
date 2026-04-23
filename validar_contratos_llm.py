@@ -2,27 +2,28 @@
 """
 VALIDADOR SEMÁNTICO DE CONTRATOS — Fase 1.5
 =============================================
-Lee la base de datos SQLite generada por secop_fase1_v3.py y valida
-semánticamente cada contrato usando Claude (Anthropic API).
+Lee la base de datos SQLite que generó secop_fase1_v3.py y valida
+semánticamente cada contrato usando Claude (API de Anthropic).
 
-Para cada contrato se responde Sí/No: ¿el objeto del contrato es relevante
-para el indicador al que fue asociado por keywords?
+Por cada contrato responde Sí o No: ¿el objeto del contrato tiene que ver
+con el indicador al que lo asociaron las keywords?
 
-Los contratos NO relevantes se conservan en la BD con validado_llm = 0.
-Los contratos relevantes quedan con validado_llm = 1.
-Los contratos aún no procesados quedan con validado_llm = NULL.
+Cómo quedan marcados los contratos en la BD:
+  validado_llm = 1    → sí es relevante
+  validado_llm = 0    → no es relevante (pero se conserva en la BD)
+  validado_llm = NULL → todavía no se ha procesado
 
-PRERREQUISITOS:
+ANTES DE CORRERLO:
     pip install anthropic pandas openpyxl
 
-USO:
+PARA CORRERLO:
     python validar_contratos_llm.py
     python validar_contratos_llm.py --db mi_bd.db --excel resultado_v2.xlsx
-    python validar_contratos_llm.py --solo-exportar   (regenera Excel sin llamar API)
+    python validar_contratos_llm.py --solo-exportar   (regenera el Excel sin tocar la API)
 
-SALIDAS:
-    - BD SQLite actualizada (columna validado_llm en tabla contratos)
-    - Excel con hoja adicional "09_Contratos_Validados_LLM"
+QUÉ GENERA:
+    - La BD SQLite actualizada (columna validado_llm en la tabla contratos)
+    - Un Excel con una hoja adicional: "09_Contratos_Validados_LLM"
 """
 
 import os
@@ -42,18 +43,18 @@ from pathlib import Path
 # CONFIGURACIÓN — edita estas variables
 # =============================================================================
 
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")  # set in env: export ANTHROPIC_API_KEY="sk-ant-..."
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")  
 
 DB_PATH      = "fase1_inventario_v3.db"      # BD generada por secop_fase1_v3.py
 EXCEL_SALIDA = "fase1_resultado_v3_validado.xlsx"
 LOG_FILE     = "validacion_llm.log"
 
-BATCH_SIZE        = 12    # contratos por llamada al API (12 es equilibrio costo/velocidad)
+BATCH_SIZE        = 12    # contratos por llamada al API 
 PAUSA_ENTRE_LOTES = 0.5   # segundos entre lotes
 MAX_REINTENTOS    = 3     # reintentos ante error de API
 
 # Descripción extendida por indicador para darle contexto al LLM.
-# Si un indicador no está aquí se usa el nombre de la tabla inventario.
+
 DESCRIPCION_INDICADOR = {
     "P1.41.": (
         "Formalización y titulación de predios rurales de pequeña y mediana propiedad. "
