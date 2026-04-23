@@ -1,27 +1,27 @@
 """
 SECOP-II PDF Downloader — Indicadores PDET
 ==========================================
-Lee los 4 archivos Excel de indicadores (GA1–GA4), extrae las URLs de SECOP-II
+Lee los 4 archivos Excel de indicadores (GA1 al GA4), saca las URLs de SECOP-II
 y descarga los Anexos Técnicos y Estudios Previos de cada contrato.
 
-Estructura de carpetas de salida:
+Cómo queda organizado todo:
   descargas_indicadores/
     GA1/
       CO1.NTC.XXXXXXX/
         Estudio_Previo_...pdf
         Anexo_Tecnico_...pdf
     GA2/  GA3/  GA4/
-  descargas_indicadores_FINAL.zip   ← archivo comprimido al terminar
+  descargas_indicadores_FINAL.zip   ← todo comprimido al final
 
-USO:
+Para correrlo:
   pip install selenium webdriver-manager pandas openpyxl
   python secop_descargador_indicadores.py
 
-NOTAS:
-  - GA1 y GA2: URLs en columna "URL SECOP II"
-  - GA3 y GA4: URLs embebidas en columna "Nota de Costeo"
-  - Se deduplican URLs repetidas entre archivos antes de procesar
-  - Se genera informe Excel + ZIP comprimido al finalizar
+Cosas a tener en cuenta:
+  - En GA1 y GA2 las URLs están en la columna "URL SECOP II"
+  - En GA3 y GA4 vienen metidas dentro de la columna "Nota de Costeo"
+  - Si una URL aparece en varios archivos, solo se procesa una vez
+  - Al terminar genera un informe en Excel y comprime todo en un ZIP
 """
 
 import os, re, time, shutil, logging, unicodedata, zipfile
@@ -43,7 +43,7 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from webdriver_manager.chrome import ChromeDriverManager
 
 # ─── CONFIGURACIÓN ────────────────────────────────────────────────────────────
-# Ajusta estas rutas a donde tengas los archivos Excel
+# Ajusta estas rutas a la carpeta que contiene los archivos Excel
 EXCEL_FILES = {
     "GA1": "Indicadores_Final_GA1.xlsx",
     "GA2": "Indicadores_Final_GA2.xlsx",
