@@ -1,21 +1,14 @@
 """
-Clasificador en 2 Fases: Indicadores → Segmento → Familia → Producto (SECOP II)
+Clasificador en 2 Fases: Indicadores, Segmento, Familia, Producto (SECOP II)
 ================================================================================
 Estrategia de mínimo consumo de tokens:
 
-  FASE 1  Clasifica cada indicador al SEGMENTO más cercano.
-          Catálogo: 57 segmentos únicos → prompt pequeño y fijo.
+  FASE 1  Clasifica cada indicador a la variable SEGMENTO más cercano.
+          Catálogo: 57 segmentos únicos, estableciendo un prompt pequeño y fijo.
           Batch: 20 indicadores por llamada → 31 llamadas.
 
   FASE 2  Dentro del segmento asignado, clasifica al PRODUCTO más cercano.
-          Catálogo: solo los productos de ese segmento (mediana ~130 tokens,
-          máx ~4 156 tokens) → catálogo 98% más pequeño que el total.
-          Indicadores del mismo segmento se agrupan en un único lote,
-          lo que maximiza la reutilización del catálogo.
-
-Ahorro estimado vs enviar los 12 732 productos completos:
-  - El catálogo de la fase 2 es, en promedio, 28x más pequeño.
-  - Total estimado ≈ 117 000 tokens (entrada + salida).
+          Indicadores que están en el mismo segmento se agrupan en un único lote.
 
 Archivos de entrada (misma carpeta que el script):
   - data_priorizados_Indicadores.xlsx   (hoja: Indicador_asociado, col B)
@@ -33,9 +26,8 @@ import time
 from pathlib import Path
 from collections import defaultdict
 
-# ─────────────────────────────────────────────
 # CONFIGURACIÓN
-# ─────────────────────────────────────────────
+
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")  # set in env: export ANTHROPIC_API_KEY="sk-ant-..."
 
 ARCHIVO_INDICADORES = "data_priorizados_Indicadores.xlsx"
@@ -49,10 +41,8 @@ PAUSA               = 0.4  # segundos entre llamadas
 MAX_REINTENTOS      = 3
 # ─────────────────────────────────────────────
 
-
-# ══════════════════════════════════════════════
 #  UTILIDADES
-# ══════════════════════════════════════════════
+
 
 def llamar_api(client, prompt, max_tokens=1500):
     """Llamada a la API con reintentos."""
@@ -78,10 +68,10 @@ def llamar_api(client, prompt, max_tokens=1500):
 
     return None   # señal de fallo tras todos los reintentos
 
+# ══════════════════════════════════════════════
 
-# ══════════════════════════════════════════════
 #  CARGA DE DATOS
-# ══════════════════════════════════════════════
+
 
 def cargar_datos():
     # ── Indicadores (columna B, hoja Indicador_asociado) ──
@@ -114,7 +104,7 @@ def cargar_datos():
 
 # ══════════════════════════════════════════════
 #  FASE 1 — Indicador → Segmento
-# ══════════════════════════════════════════════
+
 
 def prompt_fase1(batch, segmentos_txt):
     batch_txt = "\n".join(f"{i+1}. {ind}" for i, ind in enumerate(batch))
@@ -174,7 +164,7 @@ def fase1(client, indicadores, df_jer):
 
 # ══════════════════════════════════════════════
 #  FASE 2 — Indicador → Producto (dentro del segmento)
-# ══════════════════════════════════════════════
+
 
 def prompt_fase2(batch, productos_txt, segmento):
     batch_txt = "\n".join(f"{i+1}. {ind}" for i, ind in enumerate(batch))
@@ -188,9 +178,9 @@ PRODUCTOS DISPONIBLES EN ESTE SEGMENTO:
 
 Asocia cada indicador con el PRODUCTO más específico y semánticamente más cercano.
 Reglas:
-1. Usa EXACTAMENTE el texto del producto tal como aparece en la lista.
+1. Usa excactamente el texto del producto tal como aparece en la lista.
 2. Si ninguno es razonablemente cercano, escribe "Sin clasificar".
-3. Responde ÚNICAMENTE con un JSON array válido, sin texto adicional ni backticks.
+3. Responde unicamente con un JSON array válido, sin texto adicional ni backticks.
 
 INDICADORES:
 {batch_txt}
@@ -275,7 +265,6 @@ def fase2(client, df_f1, df_jer):
 
 # ══════════════════════════════════════════════
 #  ENRIQUECIMIENTO Y EXPORTACIÓN
-# ══════════════════════════════════════════════
 
 def enriquecer(df_f1, df_f2, df_jer):
     """
@@ -335,10 +324,8 @@ def guardar(df_final, path):
     print(f"   Clasificados        : {len(df_final) - sc}")
     print(f"   Sin clasificar      : {sc}")
 
-
 # ══════════════════════════════════════════════
 #  MAIN
-# ══════════════════════════════════════════════
 
 def main():
     print("=" * 55)
