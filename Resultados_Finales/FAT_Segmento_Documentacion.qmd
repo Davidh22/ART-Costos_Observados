@@ -1,0 +1,749 @@
+---
+title: "Cálculo Automatizado de Factores de Ajuste Territorial (FAT) por Segmento UNSPSC"
+subtitle: "Componente de Costos Observados a partir de SECOP-II — Proyecto ART Costeo Unitario PDET"
+author: "Guillermo David Hincapié Vélez — Agencia de Renovación del Territorio"
+date: today
+lang: es
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-title: "Contenido"
+    number-sections: true
+    code-fold: show
+    code-tools: true
+    theme: cosmo
+    embed-resources: true
+  pdf:
+    toc: true
+    number-sections: true
+    documentclass: article
+    geometry: margin=2.5cm
+    colorlinks: true
+execute:
+  warning: false
+  message: false
+---
+
+El presente código - a manera de reporte- documenta el proceso sistematizado de cálculo de los Factores de Ajuste Territorial para las 16 subregiones PDET. Este calculo permite subregionalizar los costos unitarios identificados y encontrados en las fases previas del proceso de investigación. El procedimiento propuesto presenta una solución a la problematica de abordar el calculo de factores de ajuste territorial a partir de muestras de contratos cuyos costos computacionales son significativamente altos e ineficientes. Bajo criterios estadisticos claros y funcionales al problema objeto de estudio, los resultados constituyen información crítica para sustentar la toma orientada de decisiones de política en torno a los PATR. 
+
+
+```{r configuracion}
+#| echo: true
+# ═══════════════════════════════════════════════════════════════════
+# INTERRUPTOR DE EJECUCIÓN
+# ═══════════════════════════════════════════════════════════════════
+# El pipeline completo requiere el archivo parquet de SECOP-II (~11 GB
+# en memoria) que reside en la máquina local. Para que este documento
+# renderice en cualquier equipo, la ejecución real está controlada por
+# el siguiente interruptor:
+#
+#   EJECUTAR <- TRUE   → corre todo el pipeline y exporta los Excel
+#   EJECUTAR <- FALSE  → renderiza solo la documentación (código visible
+#                        pero no evaluado)
+# ═══════════════════════════════════════════════════════════════════
+EJECUTAR <- FALSE
+
+# Ruta de trabajo donde reside el parquet y MunicipiosPDET.xlsx
+RUTA_DATOS <- "D:/Documents/ART_Costeo/Estructura_General/Datos/Datos_inputs"
+```
+
+# Introducción y contexto metodológico
+
+Este documento describe y ejecuta, fase por fase, el código de **cálculo automatizado de Factores de Ajuste Territorial (FAT)** a nivel de **segmento UNSPSC** (`nombre_segmento`), cruzado con los tipos de contrato relevantes de SECOP-II. Constituye la implementación operativa de la Fase V -Fase 1: Asociación , Fase 2: búsqueda contratos, Fase 3: Descarga , Fase 4: Extracción de costos -  de la metodología del componente de costos observados: una vez identificados los costos unitarios de referencia por contrato, el FAT permite extrapolar dichos costos a las 16 subregiones PDET para las cuales se dispone de metas.
+
+El FAT vincula el costo observado en cada subregión con un costo de referencia global:
+
+$$
+FAT_{subregión} = \frac{\tilde{C}_{subregión}}{\tilde{C}_{referencia}}
+$$ {#eq-fat-general}
+
+donde $\tilde{C}$ denota la **mediana** del valor del contrato, calculada sobre contratos en estados válidos que satisfacen los criterios de comparabilidad. La mediana se adopta como estimador de tendencia central por su robustez ante contratos cuyo valor global es atípico: la media aritmética de los valores contractuales está fuertemente sesgada por los contratos de gran escala suscritos por entidades nacionales (INVIAS, IDU, AEROCIVIL), cuya inclusión distorsionaría el denominador de referencia.
+
+## ¿Por qué nivel segmento y no nivel familia?
+
+Una versión previa del código calculaba los FAT usando la variable `nombre_familia` (nivel 2 UNSPSC) como elemento central. Sin embargo, al desagregar por familia las bases generadas en los filtros presentan retos importantes de significancia muestral —número insuficiente de observaciones por celda subregión × cuartil— que impiden un ejercicio de cálculo bien estructurado. Trabajar por **segmento** (nivel 1, más agregado, 57 categorías) produce resultados más completos y con estructura similar a los múltiples ejercicios realizados, a costa de una menor especificidad de producto que se controla mediante la estratificación por cuartiles de valor.
+
+## Comparabilidad y control por cuartiles
+
+La validez del FAT depende de que los contratos comparados sean homogéneos. Se garantizan tres condiciones mínimas:
+
+1. **Misma tipología contractual**: los FAT se calculan de forma independiente para cada tipo (Obra, Compraventa, Suministros, Prestación de servicios), dado que la estructura de costos varía sustancialmente entre tipologías.
+2. **Mismo alcance técnico**: la agrupación por segmento UNSPSC, refinada con la **estratificación por cuartiles del valor global del contrato**. La evidencia empírica de corridas previas mostró que en contratos de obra vial se mezclaban mantenimientos con construcciones nuevas, pero esta mezcla ocurría con incidencia marginal al interior de cada cuartil de valor: los cuartiles operan como proxy de escala/alcance del objeto contractual.
+3. **Contexto temporal homogéneo**: todos los valores nominales se deflactan individualmente a pesos constantes de 2016 mediante el IPC del DANE antes de calcular cualquier estadístico.
+
+::: {.callout-note title="Limitación declarada"}
+Los FAT se calculan sobre los **valores globales** de los contratos, no sobre precios unitarios extraídos de PDF, por dos razones: (i) el costo computacional de procesar miles de archivos PDF es elevado y no garantiza identificar las variables críticas de cantidad y precio; (ii) la no estandarización de los objetos contractuales no asegura comparabilidad sin evaluación manual. El FAT es, por tanto, una **aproximación territorial** de diferenciales de costo, no un cociente de precios unitarios. Esta limitación queda registrada explícitamente en la hoja de metadatos de cada archivo de salida. 
+:::
+
+## Estructura del pipeline
+
+El código se organiza en cuatro fases:
+
+| Fase | Contenido |
+|------|-----------|
+| **Fase 1** | Carga del parquet, filtros temporales y de estado, deflactación IPC, merge con padrón de municipios PDET |
+| **Fase 2** | Definición de parámetros globales: tipos de contrato, filtro Tukey, umbrales de calidad, diccionario de imputación por proximidad |
+| **Fase 3** | Función principal `calcular_fat_segmento()`: Tukey en log-escala, cuartiles, medianas, FAT por celda, ponderación e imputación |
+| **Fase 4** | Bucle tipo de contrato × segmento, consolidación y exportación a Excel de cinco hojas |
+
+# Fase 1: Importación, filtros, deflactación y merge PDET
+
+## Librerías y entorno
+
+```{r librerias}
+#| eval: !expr EJECUTAR
+rm(list = ls())
+setwd(RUTA_DATOS)
+
+library(arrow)      # lectura eficiente del formato parquet
+library(dplyr)      # manipulación de datos
+library(readxl)     # lectura del padrón MunicipiosPDET.xlsx
+library(stringi)    # normalización textual (transliteración Latin-ASCII)
+library(openxlsx)   # exportación de los libros Excel con formato
+
+cat("FAT AUTOMATIZADO (SEGMENTO) — Inicio:", as.character(Sys.time()), "\n")
+```
+
+## Carga del parquet y filtro temporal
+
+El insumo es `Base_SECOP_Final_ruralidad_subprogramas.parquet`, que contiene los contratos de SECOP-II (universo depurado de ~4,4 millones de registros) enriquecidos con las variables de ruralidad y subprogramas. Se restringe el análisis a contratos firmados entre **2016 y 2025**, ventana que coincide con la base de deflactación disponible.
+
+```{r carga-parquet}
+#| eval: !expr EJECUTAR
+data <- read_parquet("Base_SECOP_Final_ruralidad_subprogramas.parquet")
+cat("  Filas totales:", nrow(data), "\n")
+
+# Variable año a partir de la fecha de inicio del contrato
+data$año <- as.integer(format(data$fecha_de_inicio_del_contrato, "%Y"))
+data <- data %>% filter(año >= 2016 & año <= 2025)
+```
+
+## Filtro de estados válidos
+
+El estado administrativo determina la completitud de la información de costos. Se retienen **Cerrado**, **En ejecución** y **terminado** (así, en minúscula, tal como aparece en la fuente). Los contratos Terminados y Cerrados constituyen la fuente primaria por registrar valores reales de cierre; los En ejecución se retienen en esta etapa para maximizar el tamaño muestral por celda, con la advertencia de que su valor puede ser provisional.
+
+```{r filtro-estados}
+#| eval: !expr EJECUTAR
+data_cerrados <- data %>%
+  filter(estado_contrato %in% c("Cerrado", "En ejecución", "terminado"))
+cat("  Contratos cerrados/ejecución/terminados:", nrow(data_cerrados), "\n")
+```
+
+## Deflactación IPC (DANE, base 2016 = 100)
+
+Cada contrato se deflacta individualmente según su año de firma:
+
+$$
+v_i^{real} = v_i^{nominal} \times \frac{100}{IPC_{t_i}}
+$$ {#eq-deflactacion}
+
+donde $IPC_{t_i}$ es el índice del año de firma del contrato $i$ con base $IPC_{2016} = 100$. Deflactar **antes** de promediar evita que la mezcla de valores nominales de distintos años introduzca sesgos inflacionarios en las medianas.
+
+```{r deflactacion}
+#| eval: !expr EJECUTAR
+ipc_colombia <- data.frame(
+  año = c(2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025),
+  ipc = c(100.00, 104.09, 107.41, 111.06, 112.67,
+          116.23, 129.39, 140.69, 148.50, 155.00)
+)
+
+data_cerrados <- data_cerrados %>%
+  left_join(ipc_colombia, by = "año") %>%
+  mutate(valor_real_2016 = valor_del_contrato * (100 / ipc)) %>%
+  select(-ipc)
+```
+
+## Normalización textual y merge con el padrón PDET
+
+El campo `ciudad` de SECOP-II refleja la **sede de la entidad contratante**, no necesariamente el municipio de ejecución; aun así, es la mejor variable disponible para la asignación subregional masiva. El cruce con `MunicipiosPDET.xlsx` se hace por municipio **y** departamento, previa normalización (transliteración Latin-ASCII, mayúsculas, recorte de espacios), lo que garantiza que variaciones ortográficas o de codificación no rompan el join. Los contratos sin correspondencia se etiquetan como `"No PDET"` y se conservan: no participan del numerador subregional, pero sí definen la frontera del universo.
+
+```{r merge-pdet}
+#| eval: !expr EJECUTAR
+normalizar <- function(x) {
+  x %>%
+    stringi::stri_trans_general("Latin-ASCII") %>%
+    toupper() %>%
+    trimws() %>%
+    gsub("\\s+", " ", .)
+}
+
+pdet <- read_excel("MunicipiosPDET.xlsx")
+pdet_limpio <- pdet %>%
+  rename(
+    subregion_pdet = `Subregión PDET`,
+    departamento   = `Departamento`,
+    municipio      = `Municipio`
+  ) %>%
+  mutate(
+    municipio_norm    = normalizar(municipio),
+    departamento_norm = normalizar(departamento)
+  ) %>%
+  select(subregion_pdet, departamento_norm, municipio_norm)
+
+data_cerrados <- data_cerrados %>%
+  mutate(
+    ciudad_norm       = normalizar(ciudad),
+    departamento_norm = normalizar(departamento)
+  ) %>%
+  left_join(pdet_limpio,
+            by = c("ciudad_norm" = "municipio_norm",
+                   "departamento_norm" = "departamento_norm")) %>%
+  mutate(subregion_pdet = ifelse(is.na(subregion_pdet),
+                                 "No PDET", subregion_pdet))
+
+cat("  Contratos PDET:",    sum(data_cerrados$subregion_pdet != "No PDET"), "\n")
+cat("  Contratos No PDET:", sum(data_cerrados$subregion_pdet == "No PDET"), "\n")
+
+# Liberar memoria: el parquet completo puede superar los 11 GB en RAM
+rm(data, pdet)
+invisible(gc())
+```
+
+# Fase 2: Parámetros globales
+
+Todos los parámetros metodológicos se declaran de forma centralizada, lo que garantiza auditabilidad: cualquier cambio de umbral queda documentado en un único lugar y se replica automáticamente en la hoja `00_Metadatos` de cada archivo de salida.
+
+```{r parametros}
+#| eval: !expr EJECUTAR
+# Tipos de contrato a procesar. Nota: incluir "Prestación de servicios"
+# amplía la muestra (representa ~92% del universo), pero sus FAT deben
+# reportarse por separado, pues su estructura de costos difiere de la
+# de Obra/Compraventa/Suministros.
+TIPOS_CONTRATO <- c("Obra", "Compraventa", "Suministros",
+                    "Prestación de servicios")
+
+# Umbral mínimo de contratos PDET para procesar un segmento
+MIN_CONTRATOS_PDET <- 10
+
+# Constante k del filtro de valores atípicos de Tukey
+TUKEY_K <- 1.5
+
+# Umbral mínimo de contratos por celda subregión × cuartil para que
+# la celda contribuya al FAT ponderado
+UMBRAL_INCLUIR <- 5
+
+# Umbral de coeficiente de variación aceptable por cuartil (%).
+# Valor deliberadamente alto: modificarlo es neurálgico porque
+# endurecerlo excluiría celdas en subregiones con poca contratación.
+CV_ACEPTABLE <- 150
+```
+
+## Diccionario de imputación por proximidad geográfica
+
+Para las subregiones sin estimador propio se define un **diccionario experto de subregiones donantes**, construido manualmente con criterio de vecindad geográfica y similitud territorial. No se trata de un algoritmo espacial: es una tabla estática de correspondencias que hace la imputación completamente trazable y auditable.
+
+```{r imputacion-diccionario}
+#| eval: !expr EJECUTAR
+IMPUTACION_PROXIMIDAD <- list(
+  "ARAUCA"                        = c("CUENCA DEL CAGUÁN Y PIEDEMONTE CAQUETEÑO"),
+  "CATATUMBO"                     = c("SIERRA NEVADA - PERIJÁ"),
+  "MONTES DE MARÍA"               = c("CHOCÓ", "URABÁ ANTIOQUEÑO"),
+  "MACARENA - GUAVIARE"           = c("CUENCA DEL CAGUÁN Y PIEDEMONTE CAQUETEÑO", "PUTUMAYO"),
+  "PACÍFICO MEDIO"                = c("CHOCÓ", "PACÍFICO Y FRONTERA NARIÑENSE"),
+  "PACÍFICO Y FRONTERA NARIÑENSE" = c("ALTO PATÍA Y NORTE DEL CAUCA", "CHOCÓ"),
+  "SUR DE BOLÍVAR"                = c("MONTES DE MARÍA", "BAJO CAUCA Y NORDESTE ANTIOQUEÑO"),
+  "SUR DEL TOLIMA"                = c("ALTO PATÍA Y NORTE DEL CAUCA", "CUENCA DEL CAGUÁN Y PIEDEMONTE CAQUETEÑO"),
+  "SUR DE CÓRDOBA"                = c("BAJO CAUCA Y NORDESTE ANTIOQUEÑO", "URABÁ ANTIOQUEÑO"),
+  "ALTO PATÍA Y NORTE DEL CAUCA"  = c("PACÍFICO Y FRONTERA NARIÑENSE", "CHOCÓ"),
+  "BAJO CAUCA Y NORDESTE ANTIOQUEÑO" = c("URABÁ ANTIOQUEÑO", "SUR DE CÓRDOBA"),
+  "CHOCÓ"                         = c("URABÁ ANTIOQUEÑO", "PACÍFICO MEDIO"),
+  "CUENCA DEL CAGUÁN Y PIEDEMONTE CAQUETEÑO" = c("PUTUMAYO", "MACARENA - GUAVIARE"),
+  "PUTUMAYO"                      = c("CUENCA DEL CAGUÁN Y PIEDEMONTE CAQUETEÑO"),
+  "SIERRA NEVADA - PERIJÁ"        = c("CATATUMBO", "MONTES DE MARÍA"),
+  "URABÁ ANTIOQUEÑO"              = c("BAJO CAUCA Y NORDESTE ANTIOQUEÑO", "CHOCÓ")
+)
+
+TODAS_SUBREGIONES <- c(
+  "ALTO PATÍA Y NORTE DEL CAUCA", "ARAUCA",
+  "BAJO CAUCA Y NORDESTE ANTIOQUEÑO", "CATATUMBO", "CHOCÓ",
+  "CUENCA DEL CAGUÁN Y PIEDEMONTE CAQUETEÑO", "MACARENA - GUAVIARE",
+  "MONTES DE MARÍA", "PACÍFICO MEDIO", "PACÍFICO Y FRONTERA NARIÑENSE",
+  "PUTUMAYO", "SIERRA NEVADA - PERIJÁ", "SUR DE BOLÍVAR",
+  "SUR DE CÓRDOBA", "SUR DEL TOLIMA", "URABÁ ANTIOQUEÑO"
+)
+```
+
+
+::: {.callout-note title="Limitación declarada"}
+Es importante mencionar que el criterio de próximidad geográfica llevado a cabo no se sustenta en un criterio particular de proximidad de naturaleza espacial, como puede ser la distancia a centroides, el criterio de contiguiedad tipo Queen, tipo Rook, entre otros. Estos criterios se respaldan, a su vez, en la existencia de dependencia espacial, la cual consiste en recabar evidencia estadistica que apunta a inferir que los costos (tanto globales como unitarios) de un contrato en una subregión depende del valor promedio de los costos de los vecinos próximos. Los resultados llevados a cabo por la otra metodología de costeo espacial va en dicho sentido y, por tanto, sustenta la realización de imputación por proximidad geográfica. Un ejercicio posterior, se recomienda, puede emplear un criterio explicito de proximidad de naturaleza espacial. 
+:::
+
+
+# Fase 3: Función principal `calcular_fat_segmento()`
+
+Esta función recibe el subconjunto de contratos de un segmento y un tipo de contrato y ejecuta la secuencia completa de cálculo. Se documenta a continuación cada etapa interna.
+
+## Filtro de valores atípicos de Tukey en escala logarítmica
+
+Se eliminan los contratos cuyo logaritmo natural del valor deflactado cae fuera de:
+
+$$
+\left[\, Q_1^{ln} - 1{,}5 \cdot IQR^{ln},\; Q_3^{ln} + 1{,}5 \cdot IQR^{ln} \,\right]
+$$ {#eq-tukey}
+
+con $IQR^{ln} = Q_3^{ln} - Q_1^{ln}$. La aplicación en escala logarítmica responde a una razón fundamental: los valores contractuales siguen distribuciones fuertemente asimétricas a la derecha, por lo que el filtro Tukey estándar en escala original retendría un rango demasiado amplio. La transformación logarítmica simetriza la distribución antes del filtro, haciendo que la regla $1{,}5 \times IQR$ opere sobre una escala más homogénea.
+
+## Estratificación por cuartiles y FAT por celda
+
+Los contratos supervivientes se estratifican en cuatro cuartiles de valor (Q1: Bajo, Q2: Medio-bajo, Q3: Medio-alto, Q4: Alto) construidos sobre la base PDET limpia. El FAT de cada celda subregión $s$, cuartil $q$, segmento $g$ es:
+
+$$
+\widehat{FAT}_{s,q,g} = \frac{\text{Mediana}\left(\{v_{i,g}\}_{i \in s,q}\right)}{\text{Mediana}\left(\{v_{i,g}\}_{i \in PDET,q}\right)}
+$$ {#eq-fat-celda}
+
+El numerador es la mediana subregional dentro del cuartil; el denominador es la mediana global de todos los contratos PDET del mismo cuartil. Cada celda recibe un semáforo de calidad según su tamaño muestral $n_{s,q,g}$:
+
+| Condición | Calidad | Contribuye al FAT |
+|-----------|---------|:---:|
+| $n = 1$ | Excluir — valor único | No |
+| $1 < n < 5$ | Precaución — N bajo | No |
+| $5 \le n < 15$ | Aceptable | Sí |
+| $n \ge 15$ | Confiable | Sí |
+
+Adicionalmente, se calcula la dispersión interna de cada cuartil mediante el coeficiente de variación:
+
+$$
+CV_{q,g} = \frac{\sigma_{q,g}}{\bar{v}_{q,g}} \times 100
+$$ {#eq-cv}
+
+y las celdas con $CV > 150\%$ reciben alerta de alta dispersión en la hoja `03_Dispersion_Cuartiles`, advirtiendo sobre la debilidad del estimador.
+
+## FAT ponderado por subregión
+
+El FAT final de cada subregión es la media ponderada de los FAT de celda sobre los cuartiles que superan el umbral de inclusión ($n \ge 5$), con el número de contratos como ponderador:
+
+$$
+FAT_{s,g} = \frac{\displaystyle\sum_{q:\, n_{s,q,g} \ge 5} n_{s,q,g} \cdot \widehat{FAT}_{s,q,g}}{\displaystyle\sum_{q:\, n_{s,q,g} \ge 5} n_{s,q,g}}
+$$ {#eq-fat-ponderado}
+
+## Imputación de subregiones faltantes
+
+Las subregiones sin FAT directo —sin contratos del segmento o con todos sus cuartiles por debajo del umbral— reciben un valor imputado: el promedio de los FAT de sus subregiones donantes según el diccionario de proximidad; si ninguna donante tiene estimador, se usa el promedio general de las subregiones con FAT disponible. El método de origen queda registrado en la columna `metodo` (`"Calculado — datos observados"`, `"Imputado — proximidad geográfica"` o `"Imputado — promedio general"`), garantizando trazabilidad total.
+
+Finalmente, cada FAT se clasifica en tres tramos: **Bajo** ($FAT < 1{,}00$, subregión más accesible que la referencia), **Medio** ($1{,}00 \le FAT < 1{,}45$) y **Alto** ($FAT \ge 1{,}45$, sobrecoste territorial significativo).
+
+## Implementación
+
+```{r funcion-fat}
+#| eval: !expr EJECUTAR
+calcular_fat_segmento <- function(datos_segmento, nombre_segmento_str,
+                                  tipo_contrato_str) {
+
+  # ── Filtrar solo PDET ─────────────────────────────────────────────
+  datos_pdet <- datos_segmento %>% filter(subregion_pdet != "No PDET")
+  n_pdet <- nrow(datos_pdet)
+
+  if (n_pdet < MIN_CONTRATOS_PDET) {
+    return(list(
+      fat_completo = NULL, fat_cuartil = NULL, dispersion = NULL,
+      status  = "OMITIDA",
+      mensaje = paste0("Solo ", n_pdet, " contratos PDET (mínimo: ",
+                       MIN_CONTRATOS_PDET, ")")
+    ))
+  }
+
+  # ── Filtro Tukey 1.5×IQR en log-escala ────────────────────────────
+  datos_limpia <- datos_pdet %>%
+    mutate(ln_valor = log(valor_real_2016)) %>%
+    mutate(
+      q1_log    = quantile(ln_valor, 0.25, na.rm = TRUE),
+      q3_log    = quantile(ln_valor, 0.75, na.rm = TRUE),
+      iqr_log   = q3_log - q1_log,
+      fence_inf = q1_log - TUKEY_K * iqr_log,
+      fence_sup = q3_log + TUKEY_K * iqr_log,
+      outlier   = (ln_valor < fence_inf | ln_valor > fence_sup)
+    ) %>%
+    filter(!outlier)
+
+  n_outliers <- n_pdet - nrow(datos_limpia)
+
+  if (nrow(datos_limpia) < MIN_CONTRATOS_PDET) {
+    return(list(
+      fat_completo = NULL, fat_cuartil = NULL, dispersion = NULL,
+      status  = "OMITIDA",
+      mensaje = paste0("Solo ", nrow(datos_limpia), " contratos tras Tukey")
+    ))
+  }
+
+  # ── Cuartiles sobre la base limpia PDET ───────────────────────────
+  datos_limpia <- datos_limpia %>%
+    mutate(
+      cuartil_valor = ntile(valor_real_2016, 4),
+      cuartil_label = case_when(
+        cuartil_valor == 1 ~ "Q1 — Bajo",
+        cuartil_valor == 2 ~ "Q2 — Medio-bajo",
+        cuartil_valor == 3 ~ "Q3 — Medio-alto",
+        cuartil_valor == 4 ~ "Q4 — Alto"
+      )
+    )
+
+  # ── Dispersión por cuartil (ecuación del CV) ──────────────────────
+  dispersion <- datos_limpia %>%
+    group_by(cuartil_valor, cuartil_label) %>%
+    summarise(
+      n         = n(),
+      mediana   = median(valor_real_2016, na.rm = TRUE),
+      media     = mean(valor_real_2016,   na.rm = TRUE),
+      desv_std  = sd(valor_real_2016,     na.rm = TRUE),
+      cv_pct    = round(sd(valor_real_2016, na.rm = TRUE) /
+                          mean(valor_real_2016, na.rm = TRUE) * 100, 1),
+      valor_min = min(valor_real_2016, na.rm = TRUE),
+      valor_max = max(valor_real_2016, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      segmento  = nombre_segmento_str,
+      tipo      = tipo_contrato_str,
+      cv_alerta = ifelse(cv_pct > CV_ACEPTABLE, "CV alto", "OK")
+    )
+
+  # ── Numerador: mediana por cuartil × subregión ────────────────────
+  mediana_sub <- datos_limpia %>%
+    group_by(subregion_pdet, cuartil_valor, cuartil_label) %>%
+    summarise(
+      n = n(),
+      mediana_subregion = ifelse(n() == 1,
+                                 max(valor_real_2016, na.rm = TRUE),
+                                 median(valor_real_2016, na.rm = TRUE)),
+      advertencia = case_when(
+        n() == 1 ~ "Un solo contrato",
+        n() < 5  ~ paste0("Ojo N = ", n(), " — mediana débil"),
+        TRUE     ~ ""
+      ),
+      .groups = "drop"
+    )
+
+  # ── Denominador: mediana global por cuartil ───────────────────────
+  mediana_glob <- datos_limpia %>%
+    group_by(cuartil_valor, cuartil_label) %>%
+    summarise(mediana_global = median(valor_real_2016, na.rm = TRUE),
+              .groups = "drop")
+
+  # ── FAT por celda subregión × cuartil ─────────────────────────────
+  fat_cuartil <- mediana_sub %>%
+    left_join(mediana_glob, by = c("cuartil_valor", "cuartil_label")) %>%
+    mutate(
+      FAT_proxy   = round(mediana_subregion / mediana_global, 4),
+      calidad_FAT = case_when(
+        n == 1             ~ "Excluir — valor único",
+        n < UMBRAL_INCLUIR ~ "Precaución — N bajo",
+        n < 15             ~ "Aceptable",
+        TRUE               ~ "Confiable"
+      ),
+      incluir  = (n >= UMBRAL_INCLUIR),
+      segmento = nombre_segmento_str,
+      tipo     = tipo_contrato_str
+    ) %>%
+    arrange(cuartil_valor, subregion_pdet)
+
+  # ── FAT ponderado por subregión ───────────────────────────────────
+  fat_resumen <- fat_cuartil %>%
+    filter(incluir == TRUE) %>%
+    group_by(subregion_pdet) %>%
+    summarise(
+      n_cuartiles_validos = n(),
+      n_contratos_total   = sum(n),
+      FAT_ponderado       = round(weighted.mean(FAT_proxy, n), 4),
+      .groups = "drop"
+    )
+
+  # ── Imputación de subregiones faltantes ───────────────────────────
+  subregiones_presentes <- unique(datos_limpia$subregion_pdet)
+  subregiones_con_fat   <- fat_resumen$subregion_pdet
+  subregiones_sin_fat   <- setdiff(subregiones_presentes, subregiones_con_fat)
+  subregiones_ausentes  <- setdiff(TODAS_SUBREGIONES, subregiones_presentes)
+  subregiones_a_imputar <- union(subregiones_sin_fat, subregiones_ausentes)
+
+  imputados_lista <- list()
+  for (sub in subregiones_a_imputar) {
+    donantes <- IMPUTACION_PROXIMIDAD[[sub]]
+    if (is.null(donantes)) donantes <- character(0)
+
+    donantes_con_fat <- intersect(donantes, fat_resumen$subregion_pdet)
+
+    if (length(donantes_con_fat) > 0) {
+      fat_imputado <- mean(fat_resumen$FAT_ponderado[
+        fat_resumen$subregion_pdet %in% donantes_con_fat])
+      donante_str <- paste(donantes_con_fat, collapse = " + ")
+      metodo_str  <- "Imputado — proximidad geográfica"
+    } else {
+      fat_imputado <- mean(fat_resumen$FAT_ponderado, na.rm = TRUE)
+      donante_str  <- "Promedio general (sin donante disponible)"
+      metodo_str   <- "Imputado — promedio general"
+    }
+
+    imputados_lista[[sub]] <- data.frame(
+      subregion_pdet      = sub,
+      n_cuartiles_validos = 0L,
+      n_contratos_total   = 0L,
+      FAT_ponderado       = round(fat_imputado, 4),
+      metodo              = metodo_str,
+      subregion_donante   = donante_str,
+      stringsAsFactors    = FALSE
+    )
+  }
+
+  imputados_df <- bind_rows(imputados_lista)
+
+  fat_resumen <- fat_resumen %>%
+    mutate(metodo            = "Calculado — datos observados",
+           subregion_donante = NA_character_)
+
+  fat_completo <- bind_rows(fat_resumen, imputados_df) %>%
+    mutate(
+      tramo_FAT = case_when(
+        FAT_ponderado < 1.00 ~ "Bajo  (< 1.00)",
+        FAT_ponderado < 1.45 ~ "Medio (1.00 – 1.45)",
+        TRUE                 ~ "Alto  (≥ 1.45)"
+      ),
+      segmento = nombre_segmento_str,
+      tipo     = tipo_contrato_str
+    ) %>%
+    arrange(subregion_pdet)
+
+  return(list(
+    fat_completo = fat_completo,
+    fat_cuartil  = fat_cuartil,
+    dispersion   = dispersion,
+    status       = "OK",
+    mensaje      = paste0("N PDET = ", n_pdet, " | Outliers = ", n_outliers,
+                          " | Post-Tukey = ", nrow(datos_limpia)),
+    n_pdet       = n_pdet,
+    n_post_tukey = nrow(datos_limpia),
+    n_outliers   = n_outliers
+  ))
+}
+```
+
+# Fase 4: Bucle principal y exportación a Excel
+
+El bucle exterior itera sobre los cuatro tipos de contrato; el interior, sobre todos los segmentos UNSPSC con al menos `MIN_CONTRATOS_PDET` contratos PDET. Cada segmento se procesa dentro de `tryCatch()`, de modo que un error aislado no interrumpa el ciclo completo. Por cada tipo de contrato se genera un archivo Excel independiente (`FAT_Segmento_Obra.xlsx`, `FAT_Segmento_Compraventa.xlsx`, etc.) con **cinco hojas estandarizadas**:
+
+| Hoja | Contenido |
+|------|-----------|
+| `00_Metadatos` | Parámetros metodológicos de la corrida (Tukey k, umbrales, base de deflactación, método de imputación y nota de limitación) — garantiza auditabilidad y reproducibilidad |
+| `01_FAT_Subregiones` | FAT ponderado por segmento × subregión, distinguiendo valores calculados de imputados (resaltados en amarillo). **Es la hoja de consumo directo del pipeline de costeo** |
+| `02_FAT_por_Cuartil` | FAT desagregado por celda con semáforo de calidad (rojo: valor único; naranja: N bajo) |
+| `03_Dispersion_Cuartiles` | Estadísticas de dispersión por cuartil con alerta de CV alto |
+| `04_Log_Segmentos` | Registro de estado (OK / OMITIDA / ERROR) por segmento procesado |
+| `05_Resumen_Ejecutivo` | FAT promedio ponderado por subregión (solo valores calculados) con clasificación en tramo global |
+
+::: {.callout-tip title="Nota técnica sobre el formato Excel"}
+En `openxlsx`, `bgFill` está diseñado para reglas de formato condicional; cuando se aplica directamente con `addStyle()` puede producir celdas renderizadas en negro en algunas versiones de Excel. Por ello, en esta versión los estilos usan `fgFill`, que es el argumento correcto para relleno sólido directo.
+:::
+
+```{r bucle-principal}
+#| eval: !expr EJECUTAR
+for (tipo in TIPOS_CONTRATO) {
+
+  cat("═══ PROCESANDO TIPO:", tipo, "═══\n")
+
+  # Filtrar por tipo de contrato
+  data_tipo <- data_cerrados %>% filter(tipo_de_contrato == tipo)
+  cat("  Total contratos:", nrow(data_tipo), "\n")
+
+  # Segmentos con muestra PDET suficiente
+  segmentos_disponibles <- data_tipo %>%
+    filter(subregion_pdet != "No PDET") %>%
+    count(nombre_segmento, sort = TRUE) %>%
+    filter(n >= MIN_CONTRATOS_PDET) %>%
+    pull(nombre_segmento)
+
+  segmentos_disponibles <- segmentos_disponibles[!is.na(segmentos_disponibles)]
+
+  cat("  Segmentos con >=", MIN_CONTRATOS_PDET, "contratos PDET:",
+      length(segmentos_disponibles), "\n\n")
+
+  if (length(segmentos_disponibles) == 0) {
+    cat("  Sin segmentos válidos para", tipo, "— omitiendo\n\n")
+    next
+  }
+
+  # Contenedores de resultados
+  todos_fat_completo <- list()
+  todos_fat_cuartil  <- list()
+  todos_dispersion   <- list()
+  log_segmentos      <- list()
+
+  for (i in seq_along(segmentos_disponibles)) {
+
+    seg <- segmentos_disponibles[i]
+    cat("  [", i, "/", length(segmentos_disponibles), "] ", seg,
+        " ... ", sep = "")
+
+    datos_seg <- data_tipo %>% filter(nombre_segmento == seg)
+
+    resultado <- tryCatch({
+      calcular_fat_segmento(datos_seg, seg, tipo)
+    }, error = function(e) {
+      list(fat_completo = NULL, fat_cuartil = NULL, dispersion = NULL,
+           status = "ERROR", mensaje = paste0("Error: ", e$message))
+    })
+
+    cat(resultado$status, " — ", resultado$mensaje, "\n")
+
+    if (resultado$status == "OK") {
+      todos_fat_completo[[seg]] <- resultado$fat_completo
+      todos_fat_cuartil[[seg]]  <- resultado$fat_cuartil
+      todos_dispersion[[seg]]   <- resultado$dispersion
+    }
+
+    log_segmentos[[seg]] <- data.frame(
+      tipo_contrato = tipo, segmento = seg,
+      status = resultado$status, mensaje = resultado$mensaje,
+      stringsAsFactors = FALSE
+    )
+  }
+
+  # ── Consolidación por tipo ───────────────────────────────────────
+  df_fat_completo <- bind_rows(todos_fat_completo)
+  df_fat_cuartil  <- bind_rows(todos_fat_cuartil)
+  df_dispersion   <- bind_rows(todos_dispersion)
+  df_log          <- bind_rows(log_segmentos)
+
+  if (nrow(df_fat_completo) == 0) {
+    cat("\n  Sin resultados válidos para", tipo, "— omitiendo Excel\n\n")
+    next
+  }
+
+  # ── Exportación a Excel ──────────────────────────────────────────
+  nombre_archivo <- paste0("FAT_Segmento_",
+                           gsub(" ", "_", gsub("ó", "o", tipo)), ".xlsx")
+  cat("\n  Exportando:", nombre_archivo, "\n")
+
+  wb <- createWorkbook()
+
+  # Hoja 00: Metadatos
+  addWorksheet(wb, "00_Metadatos")
+  meta <- data.frame(
+    Parametro = c("Fecha_ejecucion", "Tipo_contrato", "Nivel_UNSPSC",
+                  "N_segmentos_procesados", "N_segmentos_OK",
+                  "N_segmentos_omitidos", "Tukey_K", "Umbral_incluir",
+                  "CV_aceptable", "Min_contratos_PDET", "Denominador_FAT",
+                  "Metodo_imputacion", "Base_deflacion", "Nota_limitacion"),
+    Valor = c(as.character(Sys.Date()), tipo, "Segmento (nombre_segmento)",
+              length(segmentos_disponibles),
+              sum(df_log$status == "OK"), sum(df_log$status != "OK"),
+              TUKEY_K, UMBRAL_INCLUIR, CV_ACEPTABLE, MIN_CONTRATOS_PDET,
+              "Mediana global por cuartil (contratos PDET post-Tukey)",
+              "Proximidad geográfica — subregiones donantes definidas en diccionario",
+              "IPC DANE base 2016 = 100",
+              "FAT sobre valores globales sin cantidades físicas — aproximación territorial")
+  )
+  writeData(wb, "00_Metadatos", meta)
+
+  # Hoja 01: FAT por subregión (insumo directo del costeo)
+  addWorksheet(wb, "01_FAT_Subregiones")
+  writeData(wb, "01_FAT_Subregiones", df_fat_completo)
+  filas_imp <- which(grepl("Imputado", df_fat_completo$metodo)) + 1
+  if (length(filas_imp) > 0)
+    addStyle(wb, "01_FAT_Subregiones",
+             createStyle(fgFill = "#FFF3CD"),
+             rows = filas_imp, cols = 1:ncol(df_fat_completo),
+             gridExpand = TRUE)
+
+  # Hoja 02: FAT por cuartil con semáforo de calidad
+  addWorksheet(wb, "02_FAT_por_Cuartil")
+  writeData(wb, "02_FAT_por_Cuartil", df_fat_cuartil)
+  filas_excl <- which(df_fat_cuartil$calidad_FAT == "Excluir — valor único") + 1
+  filas_prec <- which(df_fat_cuartil$calidad_FAT == "Precaución — N bajo") + 1
+  if (length(filas_excl) > 0)
+    addStyle(wb, "02_FAT_por_Cuartil", createStyle(fgFill = "#FFD7D7"),
+             rows = filas_excl, cols = 1:ncol(df_fat_cuartil),
+             gridExpand = TRUE)
+  if (length(filas_prec) > 0)
+    addStyle(wb, "02_FAT_por_Cuartil", createStyle(fgFill = "#FFE0B2"),
+             rows = filas_prec, cols = 1:ncol(df_fat_cuartil),
+             gridExpand = TRUE)
+
+  # Hoja 03: Dispersión por cuartil
+  addWorksheet(wb, "03_Dispersion_Cuartiles")
+  writeData(wb, "03_Dispersion_Cuartiles", df_dispersion)
+  filas_cv <- which(df_dispersion$cv_alerta == "CV alto") + 1
+  if (length(filas_cv) > 0)
+    addStyle(wb, "03_Dispersion_Cuartiles", createStyle(fgFill = "#FFCDD2"),
+             rows = filas_cv, cols = 1:ncol(df_dispersion),
+             gridExpand = TRUE)
+
+  # Hoja 04: Log de procesamiento
+  addWorksheet(wb, "04_Log_Segmentos")
+  writeData(wb, "04_Log_Segmentos", df_log)
+  filas_omit <- which(df_log$status != "OK") + 1
+  if (length(filas_omit) > 0)
+    addStyle(wb, "04_Log_Segmentos", createStyle(fgFill = "#E0E0E0"),
+             rows = filas_omit, cols = 1:ncol(df_log), gridExpand = TRUE)
+
+  # Hoja 05: Resumen ejecutivo — FAT promedio ponderado por subregión
+  addWorksheet(wb, "05_Resumen_Ejecutivo")
+
+  df_calculado <- df_fat_completo %>%
+    filter(metodo == "Calculado — datos observados")
+
+  resumen_ejecutivo <- df_calculado %>%
+    group_by(subregion_pdet) %>%
+    summarise(
+      n_segmentos_calc  = n(),
+      total_contratos   = sum(n_contratos_total),
+      FAT_promedio_pond = round(
+        sum(FAT_ponderado * n_contratos_total) / sum(n_contratos_total), 4),
+      FAT_minimo = round(min(FAT_ponderado, na.rm = TRUE), 4),
+      FAT_maximo = round(max(FAT_ponderado, na.rm = TRUE), 4),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      tramo_global = case_when(
+        FAT_promedio_pond < 1.00 ~ "Bajo",
+        FAT_promedio_pond < 1.45 ~ "Medio",
+        TRUE                     ~ "Alto"
+      )
+    ) %>%
+    arrange(desc(FAT_promedio_pond))
+
+  writeData(wb, "05_Resumen_Ejecutivo", resumen_ejecutivo)
+
+  saveWorkbook(wb, nombre_archivo, overwrite = TRUE)
+  cat("  ✓", nombre_archivo, "guardado\n\n")
+}
+
+cat("FAT AUTOMATIZADO (SEGMENTO) — Finalizado:",
+    as.character(Sys.time()), "\n")
+cat("Archivos generados en:", getwd(), "\n")
+```
+
+# Resultados de la corrida (opcional)
+
+Si el pipeline ya fue ejecutado (en esta corrida o en una previa) y los archivos Excel están en la carpeta de trabajo, el siguiente bloque carga el resumen ejecutivo de la salida de **Prestación de servicios** —el archivo que alimenta el pipeline de costeo aguas abajo— y lo muestra como tabla. Este bloque falla silenciosamente si el archivo no existe, para no romper el render.
+
+```{r resultados}
+#| eval: !expr EJECUTAR
+archivo_res <- "FAT_Segmento_Prestacion_de_servicios.xlsx"
+if (file.exists(archivo_res)) {
+  resumen <- readxl::read_excel(archivo_res, sheet = "05_Resumen_Ejecutivo")
+  knitr::kable(
+    resumen,
+    caption = "FAT promedio ponderado por subregión — Prestación de servicios",
+    digits = 4
+  )
+} else {
+  cat("Archivo", archivo_res, "no encontrado — ejecute primero el pipeline.\n")
+}
+```
+
+# Uso aguas abajo y decisiones metodológicas registradas
+
+El producto de este pipeline se integra al flujo de costeo unitario de la siguiente manera: dado un indicador PATR, la clasificación UNSPSC de la Fase I del proyecto entrega su segmento; con el segmento y el tipo de contrato se consulta la hoja `01_FAT_Subregiones` del archivo correspondiente para obtener el FAT de cada subregión; cuando no existe FAT específico del segmento, se recurre al FAT promedio ponderado de la hoja `05_Resumen_Ejecutivo` como respaldo. El costo territorializado resulta de multiplicar el costo unitario de referencia por el FAT de la subregión destino.
+
+Decisiones metodológicas que este documento deja registradas para revisión técnica:
+
+1. **Nivel segmento sobre nivel familia**: se sacrifica especificidad de producto a cambio de representatividad muestral por celda; el control de heterogeneidad residual se traslada a la estratificación por cuartiles.
+2. **Mediana como estimador central** en numerador y denominador del FAT, por robustez ante contratos de gran escala de entidades nacionales.
+3. **Tukey en log-escala** ($k = 1{,}5$) como filtro de atípicos, apropiado para la asimetría derecha de los valores contractuales.
+4. **Umbral de inclusión $n \ge 5$** por celda y **ponderación por tamaño muestral** en el FAT subregional.
+5. **CV aceptable de 150%**: umbral deliberadamente laxo; endurecerlo excluiría celdas de subregiones con baja densidad contractual. Es el parámetro más neurálgico ante una eventual recalibración.
+6. **Imputación por diccionario experto** de subregiones donantes (no un algoritmo espacial), con respaldo en el promedio general — método completamente trazable en la columna `subregion_donante`.
+7. **FAT sobre valores globales** de contrato, no sobre precios unitarios de PDF — limitación declarada en metadatos de cada archivo de salida.
+
+---
+
+*Documento generado con Quarto. Para renderizar: `quarto render FAT_Segmento_Documentacion.qmd` (HTML y PDF). Para ejecutar el pipeline completo durante el render, cambiar `EJECUTAR <- TRUE` en el primer bloque y verificar `RUTA_DATOS`.*
