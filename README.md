@@ -251,6 +251,29 @@ Consultoría 2026 — **Agencia de Renovación del Territorio (ART)** de Colombi
 Equipo técnico: análisis económico y construcción de la metodología de costeo.
 Automatización del pipeline: desarrollo de los scripts aquí publicados.
 
-## 10. Licencia
+
+## 10. Carpeta `MCP/` — Servidor MCP de SECOP II
+
+Esta carpeta contiene el servidor MCP (Model Context Protocol) que permite consultar
+datos abiertos de SECOP II (contratación pública en Colombia) directamente desde
+asistentes de IA como Claude Desktop y ChatGPT.
+
+**Contenido:**
+
+- `server.js` — servidor MCP (versión HTTP) con las herramientas de consulta:
+  búsqueda de contratos, procesos, proveedores, estadísticas agregadas y
+  consultas SoQL avanzadas sobre los datasets de datos.gov.co.
+- `package.json` — dependencias del servidor (Node.js ≥ 18).
+- `MANUAL_ChatGPT_SECOP_II.md` / `.html` — manual paso a paso para publicar el
+  servidor (vía GitHub + Render) y conectarlo como conector personalizado en ChatGPT.
+- `README_Manual_MCP_ChatGPT.qmd` — versión Quarto del manual, con el mismo
+  contenido, en el formato estándar de documentación de este proyecto.
+
+**Uso rápido:** el servidor ya está adaptado para desplegarse en un servicio
+gratuito (Render) y exponer un endpoint público (`/mcp`) que ChatGPT o Claude
+pueden consumir sin necesidad de ejecutarlo localmente. Ver el manual para el
+proceso completo de despliegue y conexión.
+
+## 11. Licencia
 
 MIT — libre uso con atribución.
