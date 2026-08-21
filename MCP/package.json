@@ -1,0 +1,29 @@
+{
+  "name": "secop-mcp-server-http",
+  "version": "2.0.0",
+  "description": "Servidor MCP HTTP para consultar datos abiertos de SECOP II (Colombia) - versión para ChatGPT/Render",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "mcp",
+    "secop",
+    "colombia",
+    "contratacion-publica",
+    "datos-abiertos",
+    "model-context-protocol",
+    "chatgpt"
+  ],
+  "author": "Custom MCP Server",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.21.1",
+    "express": "^4.19.2",
+    "node-fetch": "^3.3.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
